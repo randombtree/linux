@@ -28,6 +28,7 @@ struct rb_augment_callbacks {
 	void (*propagate)(struct rb_node *node, struct rb_node *stop);
 	void (*copy)(struct rb_node *old, struct rb_node *new);
 	void (*rotate)(struct rb_node *old, struct rb_node *new);
+	void (*insert)(struct rb_node *parent, struct rb_node *node);
 };
 
 extern void __rb_insert_augmented(struct rb_node *node, struct rb_root *root,
@@ -58,6 +59,56 @@ rb_insert_augmented_cached(struct rb_node *node,
 	if (newleft)
 		root->rb_leftmost = node;
 	rb_insert_augmented(node, &root->rb_root, augment);
+}
+
+static __always_inline bool
+__rb_add_augmented(struct rb_node *node, struct rb_node **link,
+		   bool (*less)(struct rb_node *, const struct rb_node *),
+		   const struct rb_augment_callbacks *augment)
+{
+	struct rb_node *parent = NULL;
+	bool leftmost = true;
+
+	while (*link) {
+		parent = *link;
+		if (augment)
+			augment->insert(parent, node);
+
+		if (less(node, parent)) {
+			link = &parent->rb_left;
+		} else {
+			link = &parent->rb_right;
+			leftmost = false;
+		}
+	}
+	rb_link_node(node, parent, link);
+
+	return leftmost;
+}
+
+static __always_inline struct rb_node *
+rb_add_augmented_cached(struct rb_node *node, struct rb_root_cached *tree,
+			bool (*less)(struct rb_node *, const struct rb_node *),
+			const struct rb_augment_callbacks *augment)
+{
+	struct rb_node **link = &tree->rb_root.rb_node;
+	bool leftmost;
+
+	leftmost = __rb_add_augmented(node, link, less, augment);
+	rb_insert_augmented_cached(node, tree, leftmost, augment);
+
+	return leftmost ? node : NULL;
+}
+
+static __always_inline void
+rb_add_augmented(struct rb_node *node, struct rb_root *tree,
+		 bool (*less)(struct rb_node *, const struct rb_node *),
+		 const struct rb_augment_callbacks *augment)
+{
+	struct rb_node **link = &tree->rb_node;
+
+	__rb_add_augmented(node, link, less, augment);
+	rb_insert_augmented(node, tree, augment);
 }
 
 /*

@@ -424,11 +424,13 @@ EXPORT_SYMBOL(__rb_erase_color);
 static inline void dummy_propagate(struct rb_node *node, struct rb_node *stop) {}
 static inline void dummy_copy(struct rb_node *old, struct rb_node *new) {}
 static inline void dummy_rotate(struct rb_node *old, struct rb_node *new) {}
+static inline void dummy_insert(struct rb_node *parent, struct rb_node *node) {}
 
 static const struct rb_augment_callbacks dummy_callbacks = {
 	.propagate = dummy_propagate,
 	.copy = dummy_copy,
-	.rotate = dummy_rotate
+	.rotate = dummy_rotate,
+	.insert = dummy_insert,
 };
 
 void rb_insert_color(struct rb_node *node, struct rb_root *root)
