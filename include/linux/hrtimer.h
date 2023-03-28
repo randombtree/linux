@@ -13,7 +13,7 @@
 #define _LINUX_HRTIMER_H
 
 #include <linux/hrtimer_defs.h>
-#include <linux/rbtree.h>
+#include <linux/rbtree_augmented.h>
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/percpu.h>
@@ -97,14 +97,15 @@ enum hrtimer_restart {
 /**
  * struct hrtimer - the basic hrtimer structure
  * @node:	timerqueue node, which also manages node.expires,
- *		the absolute expiry time in the hrtimers internal
+ *		the earliest expiry time in the hrtimers internal
  *		representation. The time is related to the clock on
- *		which the timer is based. Is setup by adding
- *		slack to the _softexpires value. For non range timers
- *		identical to _softexpires.
- * @_softexpires: the absolute earliest expiry time of the hrtimer.
- *		The time which was given as expiry time when the timer
- *		was armed.
+ *		which the timer is based.
+ * @_hardexpires: The absolutely last time this timer should expire.
+ *              This is the timer expiry time with the timer slack added to it.
+ *              For non range timers identical to node.expires.
+ * @_subtree_least_expires: The least hard expiry time among all the nodes in
+ *              the subtree from this node, i.e. when the next timer should
+ *              fire.
  * @function:	timer expiry callback function
  * @base:	pointer to the timer base (per cpu and per clock)
  * @state:	state information (See bit values above)
@@ -117,7 +118,8 @@ enum hrtimer_restart {
  */
 struct hrtimer {
 	struct timerqueue_node		node;
-	ktime_t				_softexpires;
+	ktime_t				_hardexpires;
+	ktime_t				_subtree_least_expires;
 	enum hrtimer_restart		(*function)(struct hrtimer *);
 	struct hrtimer_clock_base	*base;
 	u8				state;
@@ -240,66 +242,88 @@ struct hrtimer_cpu_base {
 static inline void hrtimer_set_expires(struct hrtimer *timer, ktime_t time)
 {
 	timer->node.expires = time;
-	timer->_softexpires = time;
+	timer->_hardexpires = time;
 }
 
 static inline void hrtimer_set_expires_range(struct hrtimer *timer, ktime_t time, ktime_t delta)
 {
-	timer->_softexpires = time;
-	timer->node.expires = ktime_add_safe(time, delta);
+	timer->node.expires = time;
+	timer->_hardexpires = ktime_add_safe(time, delta);
 }
 
 static inline void hrtimer_set_expires_range_ns(struct hrtimer *timer, ktime_t time, u64 delta)
 {
-	timer->_softexpires = time;
-	timer->node.expires = ktime_add_safe(time, ns_to_ktime(delta));
+	timer->node.expires = time;
+	timer->_hardexpires = ktime_add_safe(time, ns_to_ktime(delta));
 }
+
 
 static inline void hrtimer_set_expires_tv64(struct hrtimer *timer, s64 tv64)
 {
 	timer->node.expires = tv64;
-	timer->_softexpires = tv64;
+	timer->_hardexpires = tv64;
+}
+
+static inline void hrtimer_set_subtree_least_expires(struct hrtimer *timer, ktime_t time)
+{
+	timer->_subtree_least_expires = time;
+}
+
+static inline void hrtimer_set_subtree_least_expires_tv64(struct hrtimer *timer, s64 tv64)
+{
+	timer->_subtree_least_expires = tv64;
 }
 
 static inline void hrtimer_add_expires(struct hrtimer *timer, ktime_t time)
 {
 	timer->node.expires = ktime_add_safe(timer->node.expires, time);
-	timer->_softexpires = ktime_add_safe(timer->_softexpires, time);
+	timer->_hardexpires = ktime_add_safe(timer->_hardexpires, time);
 }
 
 static inline void hrtimer_add_expires_ns(struct hrtimer *timer, u64 ns)
 {
 	timer->node.expires = ktime_add_ns(timer->node.expires, ns);
-	timer->_softexpires = ktime_add_ns(timer->_softexpires, ns);
+	timer->_hardexpires = ktime_add_ns(timer->_hardexpires, ns);
 }
 
 static inline ktime_t hrtimer_get_expires(const struct hrtimer *timer)
 {
-	return timer->node.expires;
+	return timer->_hardexpires;
 }
 
 static inline ktime_t hrtimer_get_softexpires(const struct hrtimer *timer)
 {
-	return timer->_softexpires;
+	return timer->node.expires;
 }
 
 static inline s64 hrtimer_get_expires_tv64(const struct hrtimer *timer)
 {
-	return timer->node.expires;
+	return timer->_hardexpires;
 }
+
+static inline ktime_t hrtimer_get_subtree_least_expires(const struct hrtimer *timer)
+{
+	return timer->_subtree_least_expires;
+}
+
+static inline s64 hrtimer_get_subtree_least_expires_tv64(const struct hrtimer *timer)
+{
+	return timer->_subtree_least_expires;
+}
+
 static inline s64 hrtimer_get_softexpires_tv64(const struct hrtimer *timer)
 {
-	return timer->_softexpires;
+	return timer->node.expires;
 }
 
 static inline s64 hrtimer_get_expires_ns(const struct hrtimer *timer)
 {
-	return ktime_to_ns(timer->node.expires);
+	return ktime_to_ns(timer->_hardexpires);
 }
 
 static inline ktime_t hrtimer_expires_remaining(const struct hrtimer *timer)
 {
-	return ktime_sub(timer->node.expires, timer->base->get_time());
+	return ktime_sub(timer->_hardexpires, timer->base->get_time());
 }
 
 static inline ktime_t hrtimer_cb_get_time(struct hrtimer *timer)
@@ -329,7 +353,7 @@ extern unsigned int hrtimer_resolution;
 static inline ktime_t
 __hrtimer_expires_remaining_adjusted(const struct hrtimer *timer, ktime_t now)
 {
-	ktime_t rem = ktime_sub(timer->node.expires, now);
+	ktime_t rem = ktime_sub(timer->_hardexpires, now);
 
 	/*
 	 * Adjust relative timers for the extra we added in

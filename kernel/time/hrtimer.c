@@ -512,6 +512,12 @@ static ktime_t __hrtimer_next_event_base(struct hrtimer_cpu_base *cpu_base,
 		struct hrtimer *timer;
 
 		next = timerqueue_getnext(&base->active);
+		if (!next)
+			continue;
+		/* Get next absolute timeout */
+		timer = container_of(timerqueue_getroot(&base->active),
+				     struct hrtimer, node);
+		expires = hrtimer_get_subtree_least_expires(timer);
 		timer = container_of(next, struct hrtimer, node);
 		if (timer == exclude) {
 			/* Get to the next timer in the queue. */
@@ -520,8 +526,15 @@ static ktime_t __hrtimer_next_event_base(struct hrtimer_cpu_base *cpu_base,
 				continue;
 
 			timer = container_of(next, struct hrtimer, node);
+
+			/*
+			 * Can't figure out the ideal slack with the excluded
+			 * timer (cheaply). Go with the safest value, which is
+			 * the earliest possible soft timer expiry.
+			 */
+			expires = hrtimer_get_softexpires(timer);
 		}
-		expires = ktime_sub(hrtimer_get_expires(timer), base->offset);
+		expires = ktime_sub(expires, base->offset);
 		if (expires < expires_next) {
 			expires_next = expires;
 
@@ -1088,6 +1101,7 @@ static int enqueue_hrtimer(struct hrtimer *timer,
 	/* Pairs with the lockless read in hrtimer_is_queued() */
 	WRITE_ONCE(timer->state, HRTIMER_STATE_ENQUEUED);
 
+	hrtimer_set_subtree_least_expires(timer, hrtimer_get_expires(timer));
 	return timerqueue_add(&base->active, &timer->node);
 }
 
@@ -1882,9 +1896,105 @@ static inline void __hrtimer_peek_ahead_timers(void)
 		hrtimer_interrupt(td->evtdev);
 }
 
+#define hrtimer_entry(rb_ptr) \
+	container_of(rb_entry(rb_ptr, struct timerqueue_node, node), \
+		     struct hrtimer, node)
+
+static s64 get_rb_node_subtree_expires_tv64(const struct rb_node *rb)
+{
+	return rb
+		? hrtimer_get_subtree_least_expires_tv64(hrtimer_entry(rb))
+		: KTIME_MAX;
+}
+
+static s64 get_subtree_least_expires_tv64(const struct rb_node *parent)
+{
+	if (!parent)
+		return KTIME_MAX;
+	return parent
+		? min(get_rb_node_subtree_expires_tv64(parent->rb_left),
+		      get_rb_node_subtree_expires_tv64(parent->rb_right))
+		: KTIME_MAX;
+}
+
+/**
+ * hrtimer_rb_augment_propagate - Propagate the _least_expires from child node
+ * @rb:   Node to start from
+ * @stop: Node to stop at. NULL = Propagate to the root.
+ */
+static
+void hrtimer_rb_augment_propagate(struct rb_node *rb, struct rb_node *stop)
+{
+	while (rb != stop) {
+		struct hrtimer *timer  = hrtimer_entry(rb);
+		s64 least_expires_tv64 = min(hrtimer_get_expires_tv64(timer),
+					     get_subtree_least_expires_tv64(rb));
+
+		hrtimer_set_subtree_least_expires_tv64(timer,
+						       least_expires_tv64);
+		rb = rb_parent(rb);
+	}
+}
+
+/**
+ * hrtimer_rb_augment_copy - Copy the least_expires
+ */
+static
+void hrtimer_rb_augment_copy(struct rb_node *rb_from, struct rb_node *rb_to)
+{
+	struct hrtimer *to_timer         = hrtimer_entry(rb_to);
+	const struct hrtimer *from_timer = hrtimer_entry(rb_from);;
+
+	hrtimer_set_subtree_least_expires_tv64(to_timer,
+			   hrtimer_get_subtree_least_expires_tv64(from_timer));
+}
+
+/**
+ * hrtimer_rb_augment_rotate - swap and recalculate augmentation during rbtree rotation
+ */
+static
+void hrtimer_rb_augment_rotate(struct rb_node *rb_old, struct rb_node *rb_new)
+{
+	struct hrtimer *old_timer = hrtimer_entry(rb_old);
+	s64 least_expires_tv64;
+
+	hrtimer_rb_augment_copy(rb_old, rb_new);
+
+	least_expires_tv64 = min(hrtimer_get_expires_tv64(old_timer),
+				 get_subtree_least_expires_tv64(rb_old));
+	hrtimer_set_subtree_least_expires_tv64(old_timer,
+					       least_expires_tv64);
+}
+
+/**
+ * hrtimer_timerqueue_augment_insert - timerwheel augment callback on insert
+ */
+static void hrtimer_rb_augment_insert(struct rb_node *rb_parent,
+				      struct rb_node *rb_node)
+{
+	struct hrtimer *parent_timer = hrtimer_entry(rb_parent);
+	struct hrtimer *node_timer   = hrtimer_entry(rb_node);
+	ktime_t node_expires = hrtimer_get_expires(node_timer);
+
+	if (ktime_before(node_expires,
+			 hrtimer_get_subtree_least_expires(parent_timer)))
+		hrtimer_set_subtree_least_expires(parent_timer, node_expires);
+}
+
+static const struct rb_augment_callbacks hrtimer_rb_augment_callbacks_struct = {
+	.propagate = hrtimer_rb_augment_propagate,
+	.copy      = hrtimer_rb_augment_copy,
+	.rotate    = hrtimer_rb_augment_rotate,
+	.insert    = hrtimer_rb_augment_insert,
+};
+
+static const struct rb_augment_callbacks *hrtimer_rb_augment_callbacks =
+	&hrtimer_rb_augment_callbacks_struct;
+
 #else /* CONFIG_HIGH_RES_TIMERS */
 
 static inline void __hrtimer_peek_ahead_timers(void) { }
+static const struct rb_augment_callbacks *hrtimer_rb_augment_callbacks = NULL;
 
 #endif	/* !CONFIG_HIGH_RES_TIMERS */
 
@@ -2167,7 +2277,8 @@ int hrtimers_prepare_cpu(unsigned int cpu)
 
 		clock_b->cpu_base = cpu_base;
 		seqcount_raw_spinlock_init(&clock_b->seq, &cpu_base->lock);
-		timerqueue_init_head(&clock_b->active);
+		timerqueue_init_head_augmented(&clock_b->active,
+					       hrtimer_rb_augment_callbacks);
 	}
 
 	cpu_base->cpu = cpu;
