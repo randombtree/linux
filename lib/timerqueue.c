@@ -37,6 +37,10 @@ bool timerqueue_add(struct timerqueue_head *head, struct timerqueue_node *node)
 	/* Make sure we don't add nodes that are already added */
 	WARN_ON_ONCE(!RB_EMPTY_NODE(&node->node));
 
+	if (head->augment)
+		return rb_add_augmented_cached(&node->node, &head->rb_root,
+					       __timerqueue_less,
+					       head->augment);
 	return rb_add_cached(&node->node, &head->rb_root, __timerqueue_less);
 }
 EXPORT_SYMBOL_GPL(timerqueue_add);
@@ -54,7 +58,12 @@ bool timerqueue_del(struct timerqueue_head *head, struct timerqueue_node *node)
 {
 	WARN_ON_ONCE(RB_EMPTY_NODE(&node->node));
 
-	rb_erase_cached(&node->node, &head->rb_root);
+	if (head->augment)
+		rb_erase_augmented_cached(&node->node, &head->rb_root,
+					  head->augment);
+	else
+		rb_erase_cached(&node->node, &head->rb_root);
+
 	RB_CLEAR_NODE(&node->node);
 
 	return !RB_EMPTY_ROOT(&head->rb_root.rb_root);
