@@ -2175,7 +2175,7 @@ static __latent_entropy struct task_struct *copy_process(
 	memset(&p->rss_stat, 0, sizeof(p->rss_stat));
 #endif
 
-	p->default_timer_slack_ns = current->timer_slack_ns;
+	p->default_timer_slack_ns = get_task_timer_slack_ns(current);
 
 #ifdef CONFIG_PSI
 	p->psi_flags = 0;

@@ -2166,7 +2166,8 @@ long __do_semtimedop(int semid, struct sembuf *sops,
 		rcu_read_unlock();
 
 		timed_out = !schedule_hrtimeout_range(exp,
-				current->timer_slack_ns, HRTIMER_MODE_ABS);
+						      get_task_timer_slack_ns(current),
+						      HRTIMER_MODE_ABS);
 
 		/*
 		 * fastpath: the semop has completed, either successfully or

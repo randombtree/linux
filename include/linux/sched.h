@@ -2420,4 +2420,9 @@ static inline void sched_core_fork(struct task_struct *p) { }
 
 extern void sched_set_stop_task(int cpu, struct task_struct *stop);
 
+static inline u64 get_task_timer_slack_ns(const struct task_struct *task)
+{
+	return task->timer_slack_ns;
+}
+
 #endif

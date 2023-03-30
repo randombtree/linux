@@ -2198,7 +2198,7 @@ long hrtimer_nanosleep(ktime_t rqtp, const enum hrtimer_mode mode,
 	int ret = 0;
 	u64 slack;
 
-	slack = current->timer_slack_ns;
+	slack = get_task_timer_slack_ns(current);
 	if (dl_task(current) || rt_task(current))
 		slack = 0;
 

@@ -781,7 +781,7 @@ int futex_wait_requeue_pi(u32 __user *uaddr, unsigned int flags,
 		return -EINVAL;
 
 	to = futex_setup_timer(abs_time, &timeout, flags,
-			       current->timer_slack_ns);
+			       get_task_timer_slack_ns(current));
 
 	/*
 	 * The waiter is allocated on our stack, manipulated by the requeue

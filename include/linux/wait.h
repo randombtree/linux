@@ -546,7 +546,7 @@ do {										\
 				      HRTIMER_MODE_REL);			\
 	if ((timeout) != KTIME_MAX) {						\
 		hrtimer_set_expires_range_ns(&__t.timer, timeout,		\
-					current->timer_slack_ns);		\
+					     get_task_timer_slack_ns(current)); \
 		hrtimer_sleeper_start_expires(&__t, HRTIMER_MODE_REL);		\
 	}									\
 										\

@@ -3603,7 +3603,8 @@ static int do_sigtimedwait(const sigset_t *which, kernel_siginfo_t *info,
 		spin_unlock_irq(&tsk->sighand->siglock);
 
 		__set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE);
-		ret = schedule_hrtimeout_range(to, tsk->timer_slack_ns,
+		ret = schedule_hrtimeout_range(to,
+					       get_task_timer_slack_ns(tsk),
 					       HRTIMER_MODE_REL);
 		spin_lock_irq(&tsk->sighand->siglock);
 		__set_task_blocked(tsk, &tsk->real_blocked);

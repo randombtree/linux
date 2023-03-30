@@ -642,7 +642,7 @@ int futex_wait(u32 __user *uaddr, unsigned int flags, u32 val, ktime_t *abs_time
 	q.bitset = bitset;
 
 	to = futex_setup_timer(abs_time, &timeout, flags,
-			       current->timer_slack_ns);
+			       get_task_timer_slack_ns(current));
 retry:
 	/*
 	 * Prepare to wait on uaddr. On success, it holds hb->lock and q
