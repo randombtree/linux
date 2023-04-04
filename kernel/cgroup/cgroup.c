@@ -4563,9 +4563,31 @@ struct cgroup_subsys_state *css_next_child(struct cgroup_subsys_state *pos,
 }
 
 /**
- * css_next_descendant_pre - find the next descendant for pre-order walk
+ * _css_filter_next_child - Find the next matching child of a given css
+ *
+ * Behaves as @css_next_child except that it skips children not matching the
+ * filter.
+ */
+static struct cgroup_subsys_state *
+_css_filter_next_child(struct cgroup_subsys_state *pos,
+		       struct cgroup_subsys_state *parent,
+		       bool (*filter)(struct cgroup_subsys_state *pos, void *data),
+		       void *filter_data)
+{
+	do {
+		pos = css_next_child(pos, parent);
+		if (pos && filter(pos, filter_data))
+			return pos;
+	} while (pos);
+
+	return NULL;
+}
+
+/**
+ * css_filter_next_descendant_pre - find the next descendant for pre-order walk
  * @pos: the current position (%NULL to initiate traversal)
  * @root: css whose descendants to walk
+ * @match: Function that descides wether we traverse into the subtree.
  *
  * To be used by css_for_each_descendant_pre().  Find the next descendant
  * to visit for pre-order traversal of @root's descendants.  @root is
@@ -4584,8 +4606,10 @@ struct cgroup_subsys_state *css_next_child(struct cgroup_subsys_state *pos,
  * responsibility to synchronize against on/offlining.
  */
 struct cgroup_subsys_state *
-css_next_descendant_pre(struct cgroup_subsys_state *pos,
-			struct cgroup_subsys_state *root)
+css_filter_next_descendant_pre(struct cgroup_subsys_state *pos,
+			      struct cgroup_subsys_state *root,
+			      bool (*filter)(struct cgroup_subsys_state *pos, void *data),
+			      void *filter_data)
 {
 	struct cgroup_subsys_state *next;
 
@@ -4595,20 +4619,33 @@ css_next_descendant_pre(struct cgroup_subsys_state *pos,
 	if (!pos)
 		return root;
 
-	/* visit the first child if exists */
-	next = css_next_child(NULL, pos);
+	/* Find a matching child for pos */
+	next = _css_filter_next_child(NULL, pos, filter, filter_data);
 	if (next)
 		return next;
 
-	/* no child, visit my or the closest ancestor's next sibling */
+	/* no matching child, visit my or the closest ancestor's next sibling */
 	while (pos != root) {
-		next = css_next_child(pos, pos->parent);
+		next = _css_filter_next_child(pos, pos->parent, filter, filter_data);
 		if (next)
 			return next;
 		pos = pos->parent;
 	}
 
 	return NULL;
+}
+EXPORT_SYMBOL_GPL(css_filter_next_descendant_pre);
+
+static inline bool __css_match_all(struct cgroup_subsys_state *pos, void *data)
+{
+	return true;
+}
+
+struct cgroup_subsys_state *
+css_next_descendant_pre(struct cgroup_subsys_state *pos,
+			struct cgroup_subsys_state *root)
+{
+	return css_filter_next_descendant_pre(pos, root, __css_match_all, NULL);
 }
 EXPORT_SYMBOL_GPL(css_next_descendant_pre);
 

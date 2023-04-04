@@ -147,6 +147,12 @@ struct cgroup_subsys_state *css_next_child(struct cgroup_subsys_state *pos,
 					   struct cgroup_subsys_state *parent);
 struct cgroup_subsys_state *css_next_descendant_pre(struct cgroup_subsys_state *pos,
 						    struct cgroup_subsys_state *css);
+struct cgroup_subsys_state *
+css_filter_next_descendant_pre(struct cgroup_subsys_state *pos,
+			       struct cgroup_subsys_state *root,
+			       bool (*filter)(struct cgroup_subsys_state *pos, void *data),
+			       void *filter_data);
+
 struct cgroup_subsys_state *css_rightmost_descendant(struct cgroup_subsys_state *pos);
 struct cgroup_subsys_state *css_next_descendant_post(struct cgroup_subsys_state *pos,
 						     struct cgroup_subsys_state *css);
@@ -242,6 +248,11 @@ void css_task_iter_end(struct css_task_iter *it);
 #define css_for_each_descendant_pre(pos, css)				\
 	for ((pos) = css_next_descendant_pre(NULL, (css)); (pos);	\
 	     (pos) = css_next_descendant_pre((pos), (css)))
+
+#define css_filter_for_each_descendant_pre(pos, css, filter, filter_data)            \
+  for ((pos) = css_filter_next_descendant_pre(NULL, (css), (filter), (filter_data)); \
+       (pos);									     \
+       (pos) = css_filter_next_descendant_pre((pos), (css), (filter), (filter_data)))
 
 /**
  * css_for_each_descendant_post - post-order walk of a css's descendants
