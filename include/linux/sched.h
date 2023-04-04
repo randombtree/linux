@@ -1347,6 +1347,8 @@ struct task_struct {
 	 * Time slack values; these are used to round up poll() and
 	 * select() etc timeout values. These are in nanoseconds.
 	 * The default timer slack used is 50 usec.
+	 * The effective timer slack should be retrieved with
+	 * get_task_timer_slack_ns(task)
 	 */
 	u64				timer_slack_ns;
 	u64				default_timer_slack_ns;
@@ -2422,10 +2424,19 @@ static inline void sched_core_fork(struct task_struct *p) { }
 
 extern void sched_set_stop_task(int cpu, struct task_struct *stop);
 
+#ifdef CONFIG_CGROUPS
+extern u64 cgroup_timer_slack_ns(const struct task_struct *task);
+#else
+static inline u64 cgroup_timer_slack_ns(const struct task_struct *task)
+{
+	return TASK_TIMER_SLACK_NS;
+}
+#endif
+
 static inline u64 get_task_timer_slack_ns(const struct task_struct *task)
 {
 	if (task->timer_slack_ns == U64_MAX)
-		return TASK_TIMER_SLACK_NS;
+		return cgroup_timer_slack_ns(task);
 	return task->timer_slack_ns;
 }
 

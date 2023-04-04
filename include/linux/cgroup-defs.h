@@ -408,6 +408,15 @@ struct cgroup {
 	int max_descendants;
 
 	/*
+	 * The default process time slacks:
+	 * Setting the timer_slack_ns set's this (and ancestry) cgroups to this
+	 * slack. Defaults to U64_MAX when unset. When timer_slack_ns is unset,
+	 * the parent timer slack from default_timer_slack_ns is used.
+	 */
+	u64 timer_slack_ns;
+	u64 default_timer_slack_ns;
+
+	/*
 	 * Each non-empty css_set associated with this cgroup contributes
 	 * one to nr_populated_csets.  The counter is zero iff this cgroup
 	 * doesn't have any tasks.

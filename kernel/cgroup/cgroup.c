@@ -2013,6 +2013,8 @@ static void init_cgroup_housekeeping(struct cgroup *cgrp)
 	cgrp->dom_cgrp = cgrp;
 	cgrp->max_descendants = INT_MAX;
 	cgrp->max_depth = INT_MAX;
+	cgrp->timer_slack_ns = U64_MAX;
+	cgrp->default_timer_slack_ns = TASK_TIMER_SLACK_NS; /* 50 usec default slack */
 	INIT_LIST_HEAD(&cgrp->rstat_css_list);
 	prev_cputime_init(&cgrp->prev_cputime);
 
@@ -3663,6 +3665,122 @@ static ssize_t cgroup_max_depth_write(struct kernfs_open_file *of,
 	return nbytes;
 }
 
+/**
+ * cgroup_timer_slack - Get the effective timer slack for a task
+ */
+u64 cgroup_timer_slack_ns(const struct task_struct *task)
+{
+	struct cgroup *cgrp = task_dfl_cgroup(current);
+	u64 timer_slack;
+
+	if (!cgrp)
+		return TASK_TIMER_SLACK_NS;
+
+	timer_slack = READ_ONCE(cgrp->timer_slack_ns);
+	if (timer_slack < U64_MAX)
+		return timer_slack;
+
+	timer_slack = READ_ONCE(cgrp->default_timer_slack_ns);
+	if (timer_slack < U64_MAX)
+		return timer_slack;
+
+	return TASK_TIMER_SLACK_NS;
+}
+
+static int cgroup_timer_slack_show(struct seq_file *seq, void *v)
+{
+	struct cgroup *cgrp = seq_css(seq)->cgroup;
+	u64 timer_slack = READ_ONCE(cgrp->timer_slack_ns);
+	static char *source[] = { "", "(parent) ", "(default) " };
+	char **source_selector = source;
+
+	if (timer_slack == U64_MAX) {
+		source_selector++;
+		timer_slack = READ_ONCE(cgrp->default_timer_slack_ns);
+	}
+
+	if (timer_slack == U64_MAX) {
+		source_selector++;
+		timer_slack = TASK_TIMER_SLACK_NS;
+	}
+
+	seq_printf(seq, "%s%llu\n", *source_selector, timer_slack);
+	return 0;
+}
+
+static bool __css_filter_match_unmodified(struct cgroup_subsys_state *css,
+					  void *css_origin)
+{
+	struct cgroup_subsys_state *origin = css_origin;
+
+	/* Don't include children of parents that have their slack set */
+	return css->parent->cgroup->timer_slack_ns == U64_MAX
+		|| css->parent == origin;
+}
+
+static ssize_t cgroup_timer_slack_write(struct kernfs_open_file *of,
+					char *buf, size_t nbytes, loff_t off)
+{
+	struct cgroup *cgrp;
+	struct cgroup_subsys_state *css;
+	ssize_t ret;
+	u64 timer_slack;
+	u64 default_timer_slack;
+
+	buf = strstrip(buf);
+	if (!strcmp(buf, "default")) {
+		timer_slack = U64_MAX;
+	} else {
+		ret = kstrtoull(buf, 0, &timer_slack);
+		if (ret)
+			return ret;
+	}
+
+	cgrp = cgroup_kn_lock_live(of->kn, false);
+	if (!cgrp)
+		return -ENOENT;
+
+	/*
+	 * When "unsetting" the timer slack, need to propagate the previous
+	 * timer slack to the descendants
+	 */
+	if (timer_slack == U64_MAX)
+		default_timer_slack = cgrp->default_timer_slack_ns;
+	else
+		default_timer_slack = timer_slack;
+
+	/*
+	 * Update the default timer slack to all descendants, except subtrees
+	 * that have their own timer slacks set. We do, however, need to update
+	 * the default value even for cgroups that have the timer slack set!
+	 * (see filter function).
+	 */
+	spin_lock_irq(&css_set_lock);
+	css_filter_for_each_descendant_pre(css,
+					   &cgrp->self,
+					   __css_filter_match_unmodified,
+					   &cgrp->self) {
+		struct cgroup *dcgrp = css->cgroup;
+
+		/* current cgroup keeps the parent default */
+		if (dcgrp == cgrp)
+			continue;
+
+		if (cgroup_is_dead(dcgrp))
+			continue;
+
+
+		dcgrp->default_timer_slack_ns = default_timer_slack;
+	}
+	spin_unlock_irq(&css_set_lock);
+
+	cgrp->timer_slack_ns = timer_slack;
+
+	cgroup_kn_unlock(of->kn);
+
+	return nbytes;
+}
+
 static int cgroup_events_show(struct seq_file *seq, void *v)
 {
 	struct cgroup *cgrp = seq_css(seq)->cgroup;
@@ -5277,6 +5395,11 @@ static struct cftype cgroup_base_files[] = {
 		.write = cgroup_max_depth_write,
 	},
 	{
+		.name = "cgroup.timer_slack_ns",
+		.seq_show = cgroup_timer_slack_show,
+		.write = cgroup_timer_slack_write,
+	},
+	{
 		.name = "cgroup.stat",
 		.seq_show = cgroup_stat_show,
 	},
@@ -5641,6 +5764,10 @@ static struct cgroup *cgroup_create(struct cgroup *parent, const char *name,
 	cgrp->self.parent = &parent->self;
 	cgrp->root = root;
 	cgrp->level = level;
+
+	/* inherit parent timer slack if set, or else use the subtree default  */
+	cgrp->default_timer_slack_ns = parent->timer_slack_ns == U64_MAX ?
+		parent->default_timer_slack_ns : parent->timer_slack_ns;
 
 	ret = psi_cgroup_alloc(cgrp);
 	if (ret)
