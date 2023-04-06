@@ -170,6 +170,9 @@ static void cpuidle_idle_call(void)
 	struct cpuidle_driver *drv = cpuidle_get_cpu_driver(dev);
 	int next_state, entered_state;
 
+	/* We can avoid the next wakeup by running timers preemptively */
+	hrtimer_run_softexpired_timers();
+
 	/*
 	 * Check if the idle task must be rescheduled. If it is the
 	 * case, exit the function after re-enabling the local irq.

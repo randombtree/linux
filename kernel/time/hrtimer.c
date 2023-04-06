@@ -1901,6 +1901,38 @@ static inline void __hrtimer_peek_ahead_timers(void)
 		hrtimer_interrupt(td->evtdev);
 }
 
+/* Do a cheap test to see if there are soft-expired timers present */
+static inline bool __hrtimer_has_softexpired_timers(void)
+{
+	struct hrtimer_cpu_base *cpu_base = this_cpu_ptr(&hrtimer_bases);
+	ktime_t now;
+	unsigned long flags;
+	bool has_expired;
+
+	raw_spin_lock_irqsave(&cpu_base->lock, flags);
+	now = hrtimer_update_base(cpu_base);
+	has_expired =
+		ktime_after(now, __hrtimer_get_softexpires_safe(cpu_base->softirq_next_timer)) ||
+		ktime_after(now, __hrtimer_get_softexpires_safe(cpu_base->next_timer));
+	raw_spin_unlock_irqrestore(&cpu_base->lock, flags);
+
+	return has_expired;
+}
+
+/**
+ * hrtimer_run_softexpired_timers - Run timers that have "soft" expired.
+ *
+ * Called with interrupts disabled.
+ **/
+void hrtimer_run_softexpired_timers(void)
+{
+	if (!hrtimer_hres_active())
+		return;
+
+	if (__hrtimer_has_softexpired_timers())
+		__hrtimer_peek_ahead_timers();
+}
+
 #define hrtimer_entry(rb_ptr) \
 	container_of(rb_entry(rb_ptr, struct timerqueue_node, node), \
 		     struct hrtimer, node)

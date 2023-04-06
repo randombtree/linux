@@ -547,6 +547,12 @@ extern int schedule_hrtimeout(ktime_t *expires, const enum hrtimer_mode mode);
 /* Soft interrupt function to run the hrtimer queues: */
 extern void hrtimer_run_queues(void);
 
+#ifdef CONFIG_HIGH_RES_TIMERS
+extern void hrtimer_run_softexpired_timers(void);
+#else
+static inline void hrtimer_run_softexpired_timers(void) {};
+#endif
+
 /* Bootup initialization: */
 extern void __init hrtimers_init(void);
 
