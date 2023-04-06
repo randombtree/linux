@@ -1788,6 +1788,11 @@ static __latent_entropy void hrtimer_run_softirq(struct softirq_action *h)
 
 #ifdef CONFIG_HIGH_RES_TIMERS
 
+static inline ktime_t __hrtimer_get_softexpires_safe(struct hrtimer *timer)
+{
+	return timer ? hrtimer_get_softexpires(timer) : KTIME_MAX;
+}
+
 /*
  * High resolution timer interrupt
  * Called with interrupts disabled
@@ -1816,7 +1821,7 @@ retry:
 	 */
 	cpu_base->expires_next = KTIME_MAX;
 
-	if (!ktime_before(now, cpu_base->softirq_expires_next)) {
+	if (ktime_after(now, __hrtimer_get_softexpires_safe(cpu_base->softirq_next_timer))) {
 		cpu_base->softirq_expires_next = KTIME_MAX;
 		cpu_base->softirq_activated = 1;
 		raise_softirq_irqoff(HRTIMER_SOFTIRQ);
@@ -2025,7 +2030,7 @@ void hrtimer_run_queues(void)
 	raw_spin_lock_irqsave(&cpu_base->lock, flags);
 	now = hrtimer_update_base(cpu_base);
 
-	if (!ktime_before(now, cpu_base->softirq_expires_next)) {
+	if (ktime_after(now, __hrtimer_get_softexpires_safe(cpu_base->softirq_next_timer))) {
 		cpu_base->softirq_expires_next = KTIME_MAX;
 		cpu_base->softirq_activated = 1;
 		raise_softirq_irqoff(HRTIMER_SOFTIRQ);
