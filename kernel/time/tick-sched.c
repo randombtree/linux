@@ -941,9 +941,7 @@ static void tick_nohz_stop_tick(struct tick_sched *ts, int cpu)
 		else
 			tick_program_event(KTIME_MAX, 1);
 		return;
-	}
-
-	if (ts->nohz_mode == NOHZ_MODE_HIGHRES) {
+        } else if (ts->nohz_mode == NOHZ_MODE_HIGHRES) {
 		hrtimer_start(&ts->sched_timer, tick,
 			      HRTIMER_MODE_ABS_PINNED_HARD);
 	} else {
