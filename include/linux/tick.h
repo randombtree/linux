@@ -123,6 +123,25 @@ enum tick_dep_bits {
 #define TICK_DEP_MASK_RCU		(1 << TICK_DEP_BIT_RCU)
 #define TICK_DEP_MASK_RCU_EXP		(1 << TICK_DEP_BIT_RCU_EXP)
 
+/**
+ * tick_event_bits - For tracing nohz upcoming wakeup events.
+ */
+enum tick_evemt_bits {
+	TICK_EVENT_RCU         = 0,
+	TICK_EVENT_ARCH        = 1,
+	TICK_EVENT_IRQ_WORK    = 2,
+	TICK_EVENT_SOFTIRQ     = 3,
+	TICK_EVENT_TIMER       = 4,
+	TICK_EVENT_TIMEKEEPING = 5,
+};
+
+#define TICK_EVENT_MASK_RCU         (1 << TICK_EVENT_RCU)
+#define TICK_EVENT_MASK_ARCH        (1 << TICK_EVENT_ARCH)
+#define TICK_EVENT_MASK_IRQ_WORK    (1 << TICK_EVENT_IRQ_WORK)
+#define TICK_EVENT_MASK_SOFTIRQ     (1 << TICK_EVENT_SOFTIRQ)
+#define TICK_EVENT_MASK_TIMER       (1 << TICK_EVENT_TIMER)
+#define TICK_EVENT_MASK_TIMEKEEPING (1 << TICK_EVENT_TIMEKEEPING)
+
 #ifdef CONFIG_NO_HZ_COMMON
 extern bool tick_nohz_enabled;
 extern bool tick_nohz_tick_stopped(void);

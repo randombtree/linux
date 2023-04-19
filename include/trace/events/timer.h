@@ -417,6 +417,36 @@ TRACE_EVENT(tick_stop,
 	TP_printk("success=%d dependency=%s",  __entry->success, \
 			show_tick_dep_name(__entry->dependency))
 );
+
+#define show_tick_event_flags(flags) __print_flags(flags, "|",	\
+	{ TICK_EVENT_MASK_RCU,         "RCU" },			\
+	{ TICK_EVENT_MASK_ARCH,        "ARCH"},			\
+	{ TICK_EVENT_MASK_IRQ_WORK,    "IRQ_WORK" },		\
+	{ TICK_EVENT_MASK_SOFTIRQ,     "SOFTIRQ" },		\
+	{ TICK_EVENT_MASK_TIMER,       "TIMER" },		\
+	{ TICK_EVENT_MASK_TIMEKEEPING, "TIMEKEEPING" })
+
+/**
+ * tick_next_event - Called before idling scheduler tick.
+ * Shows reson for not going fully to sleep.
+ */
+TRACE_EVENT(tick_next_event,
+
+	TP_PROTO(int events),
+
+	TP_ARGS(events),
+
+	TP_STRUCT__entry(
+		__field( int ,		  events )
+	),
+
+	TP_fast_assign(
+		__entry->events  	= events;
+	),
+
+	TP_printk("events=%s",  show_tick_event_flags(__entry->events))
+);
+
 #endif
 
 #endif /*  _TRACE_TIMER_H */
