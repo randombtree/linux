@@ -38,6 +38,14 @@
  */
 static DEFINE_PER_CPU(struct tick_sched, tick_cpu_sched);
 
+/*
+ * tick_timekeeping_cpu tracks the CPU that is sleeping "short" and guarantees
+ * that at least one CPU will wake up in time to update the timer.
+ * It complements the tick_do_timer_cpu which tracks the CPU currently
+ * responsible for timekeeping - which can differ from the tick_timekeeping_cpu.
+ */
+int tick_timekeeping_cpu __read_mostly = TICK_DO_TIMER_NONE;
+
 struct tick_sched *tick_get_tick_sched(int cpu)
 {
 	return &per_cpu(tick_cpu_sched, cpu);
@@ -191,6 +199,8 @@ static void tick_sched_do_timer(struct tick_sched *ts, ktime_t now)
 		WARN_ON_ONCE(tick_nohz_full_running);
 #endif
 		tick_do_timer_cpu = cpu;
+		if (tick_timekeeping_cpu == TICK_DO_TIMER_NONE)
+			tick_timekeeping_cpu = cpu;
 	}
 #endif
 
@@ -536,6 +546,10 @@ static int tick_nohz_cpu_down(unsigned int cpu)
 	 */
 	if (tick_nohz_full_running && tick_do_timer_cpu == cpu)
 		return -EBUSY;
+
+	if (tick_timekeeping_cpu == cpu)
+		tick_timekeeping_cpu = TICK_DO_TIMER_NONE;
+
 	return 0;
 }
 
@@ -850,14 +864,17 @@ static ktime_t tick_nohz_next_event(struct tick_sched *ts, int cpu)
 	}
 
 	/*
-	 * If this CPU is the one which had the do_timer() duty last, we limit
-	 * the sleep time to the timekeeping max_deferment value.
+	 * If this CPU has the time-keeping duty, or no other CPU is available
+	 * for time-keeping, we sleep for a shorter time.
 	 * Otherwise we can sleep as long as we want.
 	 */
-	delta = timekeeping_max_deferment();
-	if (cpu != tick_do_timer_cpu &&
-	    (tick_do_timer_cpu != TICK_DO_TIMER_NONE || !ts->do_timer_last))
-		delta = KTIME_MAX;
+	delta = KTIME_MAX;
+	if (tick_timekeeping_cpu == cpu ||
+	    tick_timekeeping_cpu == TICK_DO_TIMER_NONE) {
+		/* If it's unbound, claim it */
+		tick_timekeeping_cpu = cpu;
+		delta = timekeeping_max_deferment();
+	}
 
 	/* Calculate the next expiry time */
 	if (delta < (KTIME_MAX - basemono)) {
@@ -891,14 +908,25 @@ static void tick_nohz_stop_tick(struct tick_sched *ts, int cpu)
 	 * the assignment and let it be taken by the CPU which runs
 	 * the tick timer next, which might be this CPU as well. If we
 	 * don't drop this here the jiffies might be stale and
-	 * do_timer() never invoked. Keep track of the fact that it
-	 * was the one which had the do_timer() duty last.
+	 * do_timer() never invoked.
 	 */
-	if (cpu == tick_do_timer_cpu) {
+	if (cpu == tick_do_timer_cpu)
 		tick_do_timer_cpu = TICK_DO_TIMER_NONE;
-		ts->do_timer_last = 1;
-	} else if (tick_do_timer_cpu != TICK_DO_TIMER_NONE) {
-		ts->do_timer_last = 0;
+
+	/*
+	 * We try to relinquish the time-keeping once in a while so that this
+	 * CPU isn't stuck with time-keeping. CPUs with a higher wakeup
+	 * frequency will naturally gravitate towards being time-keeping CPUs.
+	 * The time-keeping CPUs will sleep for a shorter time as dictated by
+	 * timekeeping_max_deferment(). Also, can't drop the time-keeping duty
+	 * directly as this leads to most or all sleeping CPUs being stuck in
+	 * time-keeping. Next CPU waking up will take over the time-keeping
+	 * duty, which might be this CPU though..
+	 */
+	if (cpu == tick_timekeeping_cpu) {
+		/* There is a 1/4 chance of trying drop on first cycle */
+		if (ts->idle_calls % 4)
+			tick_timekeeping_cpu = TICK_DO_TIMER_NONE;
 	}
 
 	/* Skip reprogram of event if its not changed */

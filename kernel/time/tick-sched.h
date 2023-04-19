@@ -30,7 +30,6 @@ enum tick_nohz_mode {
  * @tick_stopped:	Indicator that the idle tick has been stopped
  * @idle_active:	Indicator that the CPU is actively in the tick idle mode;
  *			it is reset during irq handling phases.
- * @do_timer_lst:	CPU was the last one doing do_timer before going idle
  * @got_idle_tick:	Tick timer function has run with @inidle set
  * @last_tick:		Store the last tick expiry time when the tick
  *			timer is modified for nohz sleeps. This is necessary
@@ -60,7 +59,6 @@ struct tick_sched {
 	unsigned int			inidle		: 1;
 	unsigned int			tick_stopped	: 1;
 	unsigned int			idle_active	: 1;
-	unsigned int			do_timer_last	: 1;
 	unsigned int			got_idle_tick	: 1;
 
 	ktime_t				last_tick;
