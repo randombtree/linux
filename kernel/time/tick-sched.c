@@ -787,6 +787,7 @@ static ktime_t tick_nohz_next_event(struct tick_sched *ts, int cpu)
 	u64 basemono, next_tick, delta, expires;
 	unsigned long basejiff;
 	unsigned int seq;
+	int tick_events;
 
 	/* Read jiffies and the time when jiffies were updated last */
 	do {
@@ -807,8 +808,12 @@ static ktime_t tick_nohz_next_event(struct tick_sched *ts, int cpu)
 	 * minimal delta which brings us back to this place
 	 * immediately. Lather, rinse and repeat...
 	 */
-	if (rcu_needs_cpu() || arch_needs_cpu() ||
-	    irq_work_needs_cpu() || local_timer_softirq_pending()) {
+	tick_events =
+		!!rcu_needs_cpu()      << TICK_EVENT_RCU |
+		!!arch_needs_cpu()     << TICK_EVENT_ARCH |
+		!!irq_work_needs_cpu() << TICK_EVENT_IRQ_WORK |
+		!! local_timer_softirq_pending() << TICK_EVENT_SOFTIRQ;
+	if (tick_events) {
 		next_tick = basemono + TICK_NSEC;
 	} else {
 		/*
@@ -828,6 +833,7 @@ static ktime_t tick_nohz_next_event(struct tick_sched *ts, int cpu)
 	 */
 	delta = next_tick - basemono;
 	if (delta <= (u64)TICK_NSEC) {
+		tick_events |= TICK_EVENT_MASK_TIMER;
 		/*
 		 * Tell the timer code that the base is not idle, i.e. undo
 		 * the effect of get_next_timer_interrupt():
@@ -854,14 +860,19 @@ static ktime_t tick_nohz_next_event(struct tick_sched *ts, int cpu)
 		delta = KTIME_MAX;
 
 	/* Calculate the next expiry time */
-	if (delta < (KTIME_MAX - basemono))
+	if (delta < (KTIME_MAX - basemono)) {
 		expires = basemono + delta;
-	else
+		tick_events |= TICK_EVENT_MASK_TIMEKEEPING;
+	} else {
 		expires = KTIME_MAX;
+	}
 
 	ts->timer_expires = min_t(u64, expires, next_tick);
 
 out:
+	if (tick_events)
+		trace_tick_next_event(tick_events);
+
 	return ts->timer_expires;
 }
 
